@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <style>
+    body {
+      width: 220px;
+      padding: 10px;
+      font-family: sans-serif;
+      background: #f0f0f0;
+    }
+
+    button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 8px;
+      cursor: pointer;
+      border: none;
+      font-weight: bold;
+    }
+
+    #scanBtn {
+      background: #2196F3;
+      color: white;
+    }
+
+    #startBtn {
+      background: #4CAF50;
+      color: white;
+    }
+
+    #stopBtn {
+      background: #f44336;
+      color: white;
+    }
+
+    #status {
+      font-size: 12px;
+      color: #333;
+      margin-top: 10px;
+      padding: 5px;
+      background: #fff;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+
+<body>
+  <h3>Coursera Video Downloader</h3>
+  <button id="scanBtn">1. Scan Course</button>
+  <button id="startBtn">2. Start Download</button>
+  <button id="stopBtn">STOP ALL</button>
+  <div id="status">Idle</div>
+
+  <script src="popup.js"></script>
+</body>
+
+</html>
