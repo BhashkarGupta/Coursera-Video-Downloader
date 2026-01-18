@@ -1,4 +1,4 @@
-// background.js - Version 12 (Reverted to Standard PDF)
+// background.js - Version 13 (Debugger API Restored)
 
 // Helper: Get real active downloads count from Chrome
 function getActiveCount() {
@@ -10,15 +10,76 @@ function getActiveCount() {
     });
 }
 
-// 1. RECEIVE URL
+// 1. RECEIVE URL (Video) or TRIGGER (Debugger)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "foundVideoUrl") {
         attemptDownload(request.url, request.pageTitle, 'video');
     }
-    else if (request.action === "foundReadingPdf") {
-        attemptDownload(request.dataUrl, request.pageTitle, 'reading');
+    else if (request.action === "printWithDebugger") {
+        if (sender.tab && sender.tab.id) {
+            handleDebuggerPrint(sender.tab.id, request.pageTitle);
+        }
     }
 });
+
+// --- DEBUGGER PRINT LOGIC ---
+async function handleDebuggerPrint(tabId, scrapedTitle) {
+    try {
+        console.log(`Attaching Debugger to tab ${tabId}...`);
+
+        await chrome.debugger.attach({ tabId: tabId }, "1.3");
+        await chrome.debugger.sendCommand({ tabId: tabId }, "Page.enable");
+
+        // 1. SET TABLET EMULATION (User Request: 800px)
+        await chrome.debugger.sendCommand({ tabId: tabId }, "Emulation.setDeviceMetricsOverride", {
+            width: 800,      // Tablet Width
+            height: 1600,    // Height (arbitrary)
+            deviceScaleFactor: 2,
+            mobile: true
+        });
+
+        console.log("Generating PDF via Debugger...");
+
+        // 3. PRINT TO PDF
+        const pdfResult = await chrome.debugger.sendCommand({ tabId: tabId }, "Page.printToPDF", {
+            printBackground: true,
+            marginTop: 0,
+            marginBottom: 0,
+            marginLeft: 0,
+            marginRight: 0,
+            paperWidth: 8.27, // A4
+            paperHeight: 11.69,
+            transferMode: 'ReturnAsStream' // Use Stream to avoid size limits
+        });
+
+        // 4. READ STREAM (If provided) or DATA
+        let dataUrl = '';
+        if (pdfResult.stream) {
+            // If it returns a stream handle, we'd need to read it. 
+            // However, typical `printToPDF` under 10MB returns .data directly if transferMode is default.
+            // Let's rely on standard data first to avoid complexity, or checking if chrome returns data with 'ReturnAsStream' if small enough.
+            // Actually, let's use default mode (base64) for simplicity unless it fails.
+        }
+
+        // RETRY with Base64 Mode if stream logic is complex to implement blindly
+        // Making a second call with standard mode
+        const pdfResultBase64 = await chrome.debugger.sendCommand({ tabId: tabId }, "Page.printToPDF", {
+            printBackground: true,
+            marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0,
+            paperWidth: 8.27, paperHeight: 11.69
+            // No transferMode = Base64 string return
+        });
+
+        await chrome.debugger.detach({ tabId: tabId });
+
+        dataUrl = 'data:application/pdf;base64,' + pdfResultBase64.data;
+        attemptDownload(dataUrl, scrapedTitle, 'reading');
+
+    } catch (err) {
+        console.error("Debugger Print Failed:", err);
+        try { await chrome.debugger.detach({ tabId: tabId }); } catch (e) { }
+    }
+}
 
 async function attemptDownload(url, scrapedTitle, type = 'video') {
     const data = await chrome.storage.local.get(['videoQueue', 'currentIndex', 'isJobRunning', 'concurrencyLimit']);

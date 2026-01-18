@@ -1,4 +1,4 @@
-// content.js - Version 23 (Isolation + Alignment Fix)
+// content.js - Version 27 (Debugger + Isolation Strategy)
 
 let searchInterval = null;
 
@@ -38,27 +38,26 @@ function attemptAutoGrab() {
         }
     }, 2000);
 
-    // REVEAL LOGIC (Applied to the Clone in Isolation)
+    // REVEAL LOGIC
     function aggressiveReveal(element) {
         if (!element) return;
 
-        // 1. Walk tree (for the clone, the tree is short, but we check children too)
-        const allElements = element.querySelectorAll('*');
-        allElements.forEach(el => {
-            const style = window.getComputedStyle(el);
-            if (style.display === 'none' || el.style.display === 'none') {
-                el.style.setProperty('display', 'block', 'important');
-                el.style.setProperty('visibility', 'visible', 'important');
-                el.style.setProperty('opacity', '1', 'important');
+        let curr = element;
+        while (curr && curr.tagName !== 'BODY') {
+            const style = getComputedStyle(curr);
+            if (style.display === 'none') {
+                curr.style.setProperty('display', 'block', 'important');
+                curr.style.setProperty('visibility', 'visible', 'important');
+                curr.style.setProperty('opacity', '1', 'important');
             }
-        });
+            curr = curr.parentElement;
+        }
 
-        // 2. Specific Targeting (User Request)
-        const buggedContainer = element.querySelector('.css-jgflq0');
+        const buggedContainer = document.querySelector('.css-jgflq0');
         if (buggedContainer) {
-            const innerDiv = buggedContainer.querySelector('div');
-            if (innerDiv) innerDiv.style.setProperty('display', 'block', 'important');
             buggedContainer.style.setProperty('display', 'block', 'important');
+            const inner = buggedContainer.querySelector('div');
+            if (inner) inner.style.setProperty('display', 'block', 'important');
         }
     }
 
@@ -77,95 +76,94 @@ function attemptAutoGrab() {
                 clearInterval(readingInterval);
                 if (searchInterval) clearInterval(searchInterval);
 
+                const forceShowInterval = setInterval(() => {
+                    aggressiveReveal(readingContainer);
+                }, 100);
+
                 setTimeout(() => {
-                    console.log("Preparing Independent Isolation Container...");
+                    console.log("Preparing Independent Isolation (For Debugger)...");
 
                     let pageTitle = "Unknown Reading";
                     const h1 = document.querySelector('h1');
                     if (h1) pageTitle = h1.innerText;
 
-                    // --- ISOLATION STRATEGY ---
-                    // 1. Create a temporary 'clean slate' container
+                    // --- ISOLATION STRATEGY FOR DEBUGGER ---
+                    // The live page has complex CSS (Grid/Flex) that causes overlaps when we force height.
+                    // We will COPY the content into a clean, simple BLOCK layout overlay.
+                    // The printer will see this clean overlay and paginate it perfectly.
+
+                    // 1. Create Clean Overlay
                     const overlay = document.createElement('div');
-                    overlay.id = 'pdf-gen-overlay';
+                    overlay.id = 'print-isolation-overlay';
                     overlay.style.cssText = `
-                        position: fixed;
+                        position: absolute; /* Absolute allows full scrolling */
                         top: 0;
                         left: 0;
-                        width: 800px; /* Force Tablet Width */
-                        height: auto;
-                        min-height: 100vh;
-                        padding: 20px;
+                        width: 100%;
                         background: white;
-                        z-index: 999999;
-                        overflow: visible;
+                        z-index: 2147483647; /* Max Z-Index */
+                        margin: 0;
+                        padding: 20px;
                         box-sizing: border-box;
                     `;
-                    document.body.appendChild(overlay);
 
-                    // 2. Clone the content
+                    // 2. Clone Content
                     const clone = readingContainer.cloneNode(true);
 
-                    // 3. Clean the Clone Logic
-                    // Remove negative margins or weird positioning that causes cutoff
+                    // 3. Reset Clone Styles to be Simple Block Flow
                     clone.style.cssText = `
                         margin: 0 !important;
                         padding: 0 !important;
                         width: 100% !important;
-                        max-width: 100% !important;
+                        max-width: 800px !important; /* Limit width for readability */
+                        margin-left: auto !important;
+                        margin-right: auto !important;
                         position: static !important;
                         display: block !important;
+                        height: auto !important;
+                        overflow: visible !important;
                     `;
 
-                    // 4. Append to Overlay
+                    // 4. Force Body to be simple container for overlay
+                    // We hide everything else by making the body a simple wrapper for our overlay
+                    // Note: We can't use display:none on body, but we can overlay on top.
+                    // Better: We temporarily hide the #appRoot
+                    const appRoot = document.getElementById('app');
+                    if (appRoot) appRoot.style.display = 'none';
+
+                    document.body.appendChild(overlay);
                     overlay.appendChild(clone);
 
-                    // 5. Run Reveal Logic on the *Isolated Clone*
-                    aggressiveReveal(clone);
+                    // 5. Force Height on Body now that it only contains our overlay
+                    document.body.style.height = 'auto';
+                    document.body.style.minHeight = '100vh';
+                    document.body.style.overflow = 'visible';
+                    document.documentElement.style.overflow = 'visible';
+                    document.documentElement.style.height = 'auto';
 
-                    // 6. Calculate Height from the OVERLAY (which now holds the content)
-                    const dynamicHeight = Math.max(overlay.scrollHeight + 200, 5000);
-                    console.log(`Isolation Layout Height: ${dynamicHeight}px`);
+                    // 6. Reveal Clone Internals
+                    const allInClone = clone.querySelectorAll('*');
+                    allInClone.forEach(el => {
+                        // Ensure no internal fixed heights cause overlap
+                        el.style.maxHeight = 'none';
+                        if (getComputedStyle(el).display === 'none') {
+                            el.style.display = 'block';
+                        }
+                    });
 
-                    const opt = {
-                        margin: [10, 10, 10, 10],
-                        filename: 'reading.pdf',
-                        image: { type: 'jpeg', quality: 0.98 },
-                        html2canvas: {
-                            scale: 2,
-                            useCORS: true,
-                            logging: true,
-                            width: 800,        // Match Overlay Width
-                            height: dynamicHeight,
-                            windowWidth: 800,
-                            windowHeight: dynamicHeight,
-                            scrollX: 0,
-                            scrollY: 0,
-                            x: 0,
-                            y: 0
-                        },
-                        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-                    };
+                    clearInterval(forceShowInterval);
 
-                    html2pdf().set(opt).from(overlay).outputPdf().then((pdfString) => {
-                        // Cleanup Overlay
-                        document.body.removeChild(overlay);
-
-                        const base64PDF = btoa(pdfString);
-                        const dataUrl = 'data:application/pdf;base64,' + base64PDF;
-
+                    // 7. Send Print Command
+                    // The Debugger will now print the "Body" which essentially only shows our clean Overlay.
+                    setTimeout(() => {
                         chrome.runtime.sendMessage({
-                            action: "foundReadingPdf",
-                            dataUrl: dataUrl,
-                            pageTitle: pageTitle,
-                            type: 'reading'
+                            action: "printWithDebugger",
+                            pageTitle: pageTitle
                         });
 
-                    }).catch(err => {
-                        if (document.body.contains(overlay)) document.body.removeChild(overlay);
-                        console.error("PDF Generation Failed:", err);
-                        alert("Coursera Downloader: PDF Generation Failed! Check console.");
-                    });
+                        // Optional: Reload after print to restore UI?
+                        // For now, let's leave it. User can reload manually if needed or we can add a reload banner.
+                    }, 1000); // Small delay for rendering
 
                 }, 3000);
 
@@ -205,7 +203,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         const typeText = typeLabel.innerText;
                         let itemType = null;
 
-                        // Treat Reading as Reading if possible, or fallback
                         if (typeText.includes("Video")) itemType = 'video';
                         else if (typeText.includes("Reading")) itemType = 'reading';
 
