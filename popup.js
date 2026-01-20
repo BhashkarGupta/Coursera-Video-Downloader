@@ -1,7 +1,7 @@
 // popup.js
 
 function init() {
-    chrome.storage.local.get(['videoQueue', 'currentIndex', 'isJobRunning', 'concurrencyLimit'], (data) => {
+    chrome.storage.local.get(['videoQueue', 'currentIndex', 'isJobRunning', 'concurrencyLimit', 'lastScanCount', 'lastScanAt', 'lastScanSource'], (data) => {
         const statusDiv = document.getElementById('status');
         const scanBtn = document.getElementById('scanBtn');
         const startBtn = document.getElementById('startBtn');
@@ -45,7 +45,21 @@ function init() {
                 checkReadings.disabled = false;
             }
         } else {
-            statusDiv.innerText = "No queue. Please scan.";
+            // If user just scanned and got 0 results, show a helpful message instead of immediately
+            // overwriting the scan status with "No queue".
+            if (data.lastScanAt && typeof data.lastScanCount === "number") {
+                if (data.lastScanCount === 0) {
+                    const hint =
+                        data.lastScanSource === "modules"
+                            ? "Try expanding all modules/weeks first, then Scan again."
+                            : "Open the course 'Course content' page (syllabus) and expand modules/weeks, then Scan again.";
+                    statusDiv.innerText = `Scan complete: 0 items found.\n${hint}`;
+                } else {
+                    statusDiv.innerText = "Queue not available. Please scan again.";
+                }
+            } else {
+                statusDiv.innerText = "No queue. Please scan.";
+            }
             scanBtn.classList.remove('hidden');
             startBtn.classList.add('hidden');
             stopBtn.classList.add('hidden');
@@ -118,6 +132,8 @@ document.getElementById('scanBtn').addEventListener('click', () => {
 
                 if (response && typeof response.count === "number") {
                     statusEl.innerText = `Scan complete: ${response.count} items found.`;
+                } else {
+                    statusEl.innerText = "Scan failed to return results. Please refresh the Coursera tab and try again.";
                 }
                 init();
             });

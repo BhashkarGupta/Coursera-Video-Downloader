@@ -241,57 +241,169 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 // SCANNER (Unchanged)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "scanCourse") {
-        const courseData = [];
-        const moduleHeaders = document.querySelectorAll('[data-testid="module-number-heading"]');
+        // Coursera frequently changes CSS classnames. Keep scanning logic resilient:
+        // - Prefer module/accordion scanning when stable attributes exist.
+        // - Fallback to URL-pattern scanning (lecture/supplement) if needed.
 
-        moduleHeaders.forEach((header) => {
-            const moduleName = header.innerText.trim();
-            const moduleContainer = header.closest('.cds-AccordionRoot-container');
+        const now = Date.now();
 
-            if (moduleContainer) {
-                const items = moduleContainer.querySelectorAll('li');
-                let videoCount = 0;
+        function sanitizeFilenamePart(text) {
+            return (text || "Unknown")
+                .replace(/[\\/:*?"<>|]/g, "_")
+                .replace(/\s+/g, " ")
+                .trim();
+        }
+
+        function normalizeToAbsoluteCourseraUrl(href) {
+            if (!href) return "";
+            if (href.startsWith("http://") || href.startsWith("https://")) return href;
+            if (href.startsWith("/")) return "https://www.coursera.org" + href;
+            return "";
+        }
+
+        function classifyFromHref(url) {
+            const u = (url || "").toLowerCase();
+            // Common Coursera lesson URL patterns:
+            // - .../lecture/... => video
+            // - .../supplement/... => reading
+            // - sometimes .../reading/... exists as well
+            if (u.includes("/lecture/")) return "video";
+            if (u.includes("/supplement/") || u.includes("/reading/")) return "reading";
+            return null;
+        }
+
+        function titleFromAnchor(a) {
+            const raw =
+                (a && a.innerText) ||
+                (a && a.getAttribute && a.getAttribute("aria-label")) ||
+                (a && a.getAttribute && a.getAttribute("title")) ||
+                "";
+            const cleaned = sanitizeFilenamePart(raw);
+            if (!cleaned) return "Unknown";
+            // If the anchor contains extra metadata lines, keep the most "title-like" last line.
+            const lines = cleaned.split("\n").map(s => s.trim()).filter(Boolean);
+            return lines.length ? lines[lines.length - 1] : cleaned;
+        }
+
+        function scanFromModuleHeaders() {
+            const courseData = [];
+
+            const moduleHeaders = document.querySelectorAll(
+                '[data-testid="module-number-heading"], [data-testid="week-number-heading"], [data-testid="week-heading"]'
+            );
+
+            moduleHeaders.forEach((header, moduleIdx) => {
+                const moduleName = (header.innerText || "").trim();
+                // Try common "accordion container" patterns, but don't rely on CSS-only selectors.
+                const moduleContainer =
+                    header.closest('[class*="Accordion"]') ||
+                    header.closest('section') ||
+                    header.parentElement;
+
+                if (!moduleContainer) return;
+
+                // Find items in this module. Prefer list items if present.
+                const items = moduleContainer.querySelectorAll('li, [role="listitem"]');
+                let itemCount = 0;
+
                 items.forEach((item) => {
-                    const typeLabel = item.querySelector('.css-1rhvk9j');
-                    if (typeLabel) {
-                        const typeText = typeLabel.innerText;
-                        let itemType = null;
+                    const linkEl = item.querySelector('a[href]');
+                    const href = linkEl ? linkEl.getAttribute('href') : "";
+                    const absUrl = normalizeToAbsoluteCourseraUrl(href);
+                    const itemType = classifyFromHref(absUrl);
+                    if (!itemType || !absUrl) return;
 
-                        // Treat Reading as Reading if possible, or fallback
-                        if (typeText.includes("Video")) itemType = 'video';
-                        else if (typeText.includes("Reading")) itemType = 'reading';
+                    itemCount++;
 
-                        if (itemType) {
-                            if (itemType === 'video') videoCount++;
-                            else if (itemType === 'reading') videoCount++;
-
-                            const titleEl = item.querySelector('.css-u7fh1q');
-                            const rawTitle = titleEl ? titleEl.innerText : "Unknown";
-                            const linkEl = item.querySelector('a');
-                            const href = linkEl ? linkEl.getAttribute('href') : "";
-
-                            if (href) {
-                                const modNum = moduleName.match(/\d+/)[0].padStart(2, '0');
-                                const vidNum = videoCount.toString().padStart(2, '0');
-                                let cleanTitle = rawTitle.replace(/[\\/:*?"<>|]/g, "_").trim();
-
-                                const extension = itemType === 'video' ? '.mp4' : '.pdf';
-
-                                courseData.push({
-                                    url: "https://www.coursera.org" + href,
-                                    filename: `M${modNum}_${vidNum} - ${cleanTitle}${extension}`,
-                                    type: itemType
-                                });
-                            }
-                        }
+                    // Title heuristics: prefer link text, then nearby headings/spans.
+                    let rawTitle = titleFromAnchor(linkEl);
+                    if (rawTitle === "Unknown") {
+                        const maybeTitle =
+                            item.querySelector('h3, h4, [data-testid*="title"], span')?.innerText || "";
+                        rawTitle = sanitizeFilenamePart(maybeTitle) || "Unknown";
                     }
+
+                    const modNumMatch = moduleName.match(/\d+/);
+                    const modNum = (modNumMatch ? modNumMatch[0] : String(moduleIdx + 1)).padStart(2, "0");
+                    const itemNum = String(itemCount).padStart(2, "0");
+                    const extension = itemType === "video" ? ".mp4" : ".pdf";
+
+                    courseData.push({
+                        url: absUrl,
+                        filename: `M${modNum}_${itemNum} - ${sanitizeFilenamePart(rawTitle)}${extension}`,
+                        type: itemType
+                    });
+                });
+            });
+
+            // De-dupe while keeping order.
+            const seen = new Set();
+            return courseData.filter(x => {
+                if (!x || !x.url) return false;
+                if (seen.has(x.url)) return false;
+                seen.add(x.url);
+                return true;
+            });
+        }
+
+        function scanFromAnchorsFallback() {
+            const allAnchors = Array.from(document.querySelectorAll('a[href]'));
+            const items = [];
+            const seen = new Set();
+
+            for (const a of allAnchors) {
+                const absUrl = normalizeToAbsoluteCourseraUrl(a.getAttribute("href"));
+                if (!absUrl) continue;
+
+                const itemType = classifyFromHref(absUrl);
+                if (!itemType) continue;
+
+                // Avoid duplicates and noisy navigation links.
+                if (seen.has(absUrl)) continue;
+                seen.add(absUrl);
+
+                const title = titleFromAnchor(a);
+                const idx = items.length + 1;
+                const itemNum = String(idx).padStart(2, "0");
+                const extension = itemType === "video" ? ".mp4" : ".pdf";
+
+                items.push({
+                    url: absUrl,
+                    filename: `M01_${itemNum} - ${sanitizeFilenamePart(title)}${extension}`,
+                    type: itemType
                 });
             }
-        });
 
-        chrome.storage.local.set({ videoQueue: courseData, currentIndex: 0 }, () => {
-            sendResponse({ count: courseData.length });
-        });
-        return true;
+            return items;
+        }
+
+        let courseData = [];
+        let scanSource = "modules";
+        try {
+            courseData = scanFromModuleHeaders();
+            if (!courseData || courseData.length === 0) {
+                scanSource = "anchors";
+                courseData = scanFromAnchorsFallback();
+            }
+        } catch (e) {
+            console.error("Scan failed:", e);
+            scanSource = "error";
+            courseData = [];
+        }
+
+        chrome.storage.local.set(
+            {
+                videoQueue: courseData,
+                currentIndex: 0,
+                lastScanCount: courseData.length,
+                lastScanAt: now,
+                lastScanSource: scanSource
+            },
+            () => {
+                sendResponse({ count: courseData.length, source: scanSource });
+            }
+        );
+
+        return true; // keep sendResponse channel open
     }
 });
