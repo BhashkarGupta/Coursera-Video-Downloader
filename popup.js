@@ -58,9 +58,63 @@ init();
 document.getElementById('scanBtn').addEventListener('click', () => {
     document.getElementById('status').innerText = "Scanning... (Expand modules first!)";
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        chrome.tabs.sendMessage(tabs[0].id, { action: "scanCourse" }, (response) => {
-            init();
-        });
+        const tab = tabs && tabs[0];
+        const statusEl = document.getElementById('status');
+
+        if (!tab || !tab.id) {
+            statusEl.innerText = "No active tab found. Open Coursera in a normal tab and try again.";
+            return;
+        }
+
+        const url = tab.url || "";
+        const isHttp = url.startsWith("http://") || url.startsWith("https://");
+        const isCoursera = url.includes("coursera.org/");
+
+        if (!isHttp) {
+            statusEl.innerText = "This page can't be scanned. Please open a Coursera course page (https://www.coursera.org/...) and try again.";
+            return;
+        }
+
+        if (!isCoursera) {
+            statusEl.innerText = "Please open a Coursera course page first, then click Scan Course.";
+            return;
+        }
+
+        let didInject = false;
+
+        const sendScanMessage = () => {
+            chrome.tabs.sendMessage(tab.id, { action: "scanCourse" }, (response) => {
+                // If content script isn't present in this tab, Chrome sets lastError.
+                if (chrome.runtime.lastError) {
+                    if (!didInject) {
+                        didInject = true;
+                        statusEl.innerText = "Connecting to the page... (If you just updated the extension, this may take a second.)";
+
+                        chrome.scripting.executeScript(
+                            { target: { tabId: tab.id }, files: ["content.js"] },
+                            () => {
+                                if (chrome.runtime.lastError) {
+                                    statusEl.innerText = "Couldn't connect to this Coursera tab. Please refresh the page and try Scan Course again.";
+                                    return;
+                                }
+                                sendScanMessage();
+                            }
+                        );
+                        return;
+                    }
+
+                    statusEl.innerText = "Couldn't connect to the page. Please refresh the Coursera tab and try again.";
+                    return;
+                }
+
+                if (response && typeof response.count === "number") {
+                    statusEl.innerText = `Scan complete: ${response.count} items found.`;
+                }
+                init();
+            });
+        };
+
+        sendScanMessage();
     });
 });
 

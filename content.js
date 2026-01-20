@@ -1,9 +1,11 @@
 // content.js - Version 29 (Auto-Restore UI)
 
 let searchInterval = null;
+let readingInterval = null;
 
 function attemptAutoGrab() {
     if (searchInterval) clearInterval(searchInterval);
+    if (readingInterval) clearInterval(readingInterval);
 
     const playBtn = document.querySelector('button[data-testid="centerPlayButton"]');
     if (playBtn) playBtn.click();
@@ -64,7 +66,7 @@ function attemptAutoGrab() {
     let readingAttempts = 0;
     const MAX_ATTEMPTS = 15;
 
-    const readingInterval = setInterval(() => {
+    readingInterval = setInterval(() => {
         const readingContainer = document.querySelector('.rc-ReadingItem');
 
         if (readingContainer) {
@@ -205,7 +207,36 @@ function attemptAutoGrab() {
     }, 2000);
 }
 
-attemptAutoGrab();
+function stopAutoGrab() {
+    if (searchInterval) {
+        clearInterval(searchInterval);
+        searchInterval = null;
+    }
+    if (readingInterval) {
+        clearInterval(readingInterval);
+        readingInterval = null;
+    }
+}
+
+function startAutoGrabIfRunning() {
+    chrome.storage.local.get(['isJobRunning'], (data) => {
+        if (data && data.isJobRunning) {
+            attemptAutoGrab();
+        } else {
+            stopAutoGrab();
+        }
+    });
+}
+
+// Only run auto-grab while a download job is active.
+startAutoGrabIfRunning();
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (!changes.isJobRunning) return;
+
+    if (changes.isJobRunning.newValue) startAutoGrabIfRunning();
+    else stopAutoGrab();
+});
 
 // SCANNER (Unchanged)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

@@ -16,9 +16,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         attemptDownload(request.url, request.pageTitle, 'video');
     }
     else if (request.action === "printWithDebugger") {
-        if (sender.tab && sender.tab.id) {
-            handleDebuggerPrint(sender.tab.id, request.pageTitle);
-        }
+        // Only print/download during an active job.
+        chrome.storage.local.get(['isJobRunning'], (data) => {
+            if (!data || !data.isJobRunning) return;
+            if (sender.tab && sender.tab.id) {
+                handleDebuggerPrint(sender.tab.id, request.pageTitle);
+            }
+        });
     }
 });
 
