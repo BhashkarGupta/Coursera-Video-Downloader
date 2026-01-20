@@ -1,0 +1,12 @@
+{
+  "name": "coursera-course-downloader",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.js",
+    "clean": "node scripts/build.js --clean"
+  },
+  "dependencies": {
+    "html2pdf.js": "^0.10.1"
+  }
+}
