@@ -1,7 +1,7 @@
 // popup.js
 
 function init() {
-    chrome.storage.local.get(['videoQueue', 'currentIndex', 'isJobRunning', 'concurrencyLimit'], (data) => {
+    chrome.storage.local.get(['videoQueue', 'currentIndex', 'isJobRunning', 'concurrencyLimit', 'useFolderStructure'], (data) => {
         const statusDiv = document.getElementById('status');
         const scanBtn = document.getElementById('scanBtn');
         const startBtn = document.getElementById('startBtn');
@@ -9,9 +9,16 @@ function init() {
         const concurrencyInput = document.getElementById('concurrencyInput');
         const checkVideos = document.getElementById('checkVideos');
         const checkReadings = document.getElementById('checkReadings');
+        const folderStructure = document.getElementById('folderStructure');
 
-        // Restore saved limit
+        // Restore saved limit and folder setting
         if (data.concurrencyLimit) concurrencyInput.value = data.concurrencyLimit;
+        if (data.useFolderStructure) folderStructure.checked = data.useFolderStructure;
+
+        // Save setting on change
+        folderStructure.addEventListener('change', () => {
+            chrome.storage.local.set({ useFolderStructure: folderStructure.checked });
+        });
 
         if (data.videoQueue && data.videoQueue.length > 0) {
             const current = (data.currentIndex || 0) + 1;

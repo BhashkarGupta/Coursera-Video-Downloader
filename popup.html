@@ -100,15 +100,19 @@
     </div>
   </div>
 
-  <div id="controls">
-    <button id="scanBtn" class="btn">1. Scan Course</button>
-    <button id="startBtn" class="btn hidden">2. Start Download</button>
-    <button id="stopBtn" class="btn hidden">Pause / Stop</button>
+  <div class="control-group">
+    <label for="folderStructure">Folder Structure(Experimental)</label>
+    <input type="checkbox" id="folderStructure">
+  </div>
+
+  <div class="btn-group">
+    <button id="scanBtn" class="btn">Scan Course</button>
+    <button id="startBtn" class="btn hidden">Start Downloading</button>
+    <button id="stopBtn" class="btn hidden warn">Stop</button>
+    <button id="resetBtn" class="btn danger">Reset All</button>
   </div>
 
   <div id="status">Checking status...</div>
-
-  <button id="resetBtn" class="btn">CLEAR CACHED DATA</button>
 
   <script src="popup.js"></script>
 </body>

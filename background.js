@@ -82,7 +82,7 @@ async function handleDebuggerPrint(tabId, scrapedTitle) {
 }
 
 async function attemptDownload(url, scrapedTitle, type = 'video') {
-    const data = await chrome.storage.local.get(['videoQueue', 'currentIndex', 'isJobRunning', 'concurrencyLimit']);
+    const data = await chrome.storage.local.get(['videoQueue', 'currentIndex', 'isJobRunning', 'concurrencyLimit', 'useFolderStructure']);
 
     if (!data.isJobRunning) return;
 
@@ -113,9 +113,18 @@ async function attemptDownload(url, scrapedTitle, type = 'video') {
 
     console.log(`Starting Download: ${finalFilename}`);
 
+    // Determine Folder Path
+    let relativePath = `Coursera_Course/${finalFilename}`;
+
+    if (data.useFolderStructure && currentVideo.courseName && currentVideo.moduleName) {
+        const safeCourse = currentVideo.courseName.replace(/[\\/:*?"<>|]/g, "_").trim();
+        const safeModule = currentVideo.moduleName.replace(/[\\/:*?"<>|]/g, "_").trim();
+        relativePath = `${safeCourse}/${safeModule}/${finalFilename}`;
+    }
+
     chrome.downloads.download({
         url: url,
-        filename: `Coursera_Course/${finalFilename}`,
+        filename: relativePath,
         conflictAction: "overwrite"
     }, async (downloadId) => {
         if (chrome.runtime.lastError) console.log("DL Error:", chrome.runtime.lastError);
@@ -151,8 +160,11 @@ async function navigateNext() {
     const nextIndex = data.currentIndex + 1;
 
     if (nextIndex >= data.videoQueue.length) {
-        console.log("Queue finished.");
-        await chrome.storage.local.set({ isNavigating: false });
+        console.log("Queue finished. Job Stopped.");
+        await chrome.storage.local.set({
+            isNavigating: false,
+            isJobRunning: false
+        });
         return;
     }
 

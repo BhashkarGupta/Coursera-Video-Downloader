@@ -207,14 +207,53 @@ function attemptAutoGrab() {
 
 attemptAutoGrab();
 
-// SCANNER (Unchanged)
+// SCANNER (Updated for Folder Structure)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "scanCourse") {
         const courseData = [];
+
+        // 1. Scrape Course Name
+        let courseName = "Unknown Course";
+        // Try precise selector first
+        const courseLink = document.querySelector('a[href^="/learn"][title*="Home Page"]') || document.querySelector('a[data-click-key*="course.home.page"]');
+        if (courseLink) {
+            courseName = courseLink.innerText.trim();
+        } else {
+            // Fallback
+            const h1 = document.querySelector('h1');
+            if (h1) courseName = h1.innerText.trim();
+        }
+
         const moduleHeaders = document.querySelectorAll('[data-testid="module-number-heading"]');
 
         moduleHeaders.forEach((header) => {
-            const moduleName = header.innerText.trim();
+            const moduleName = header.innerText.trim(); // "Module 1"
+
+            // 2. Scrape Module Title
+            // Navigate up to find the container that might hold the title
+            // Usually the title is in a sibling div or the parent's sibling
+            let moduleTitle = "";
+
+            // Attempt to find title in the same accordion button region
+            const accordionButton = header.closest('button');
+            if (accordionButton) {
+                // The title is often in a div sibling to the module number
+                // We'll grab all text in the button and remove the "Module X" part
+                const allText = accordionButton.innerText.split('\n');
+                if (allText.length > 1) {
+                    // Usually lines are ["Module 1", "Introduction...", "1h 20m"]
+                    // We look for the line that isn't the module number and isn't time
+                    const candidate = allText.find(line =>
+                        !line.includes("Module") &&
+                        !line.match(/^\d+[hm]\s\d+[m]?$/) // exclude "2h 10m"
+                    );
+                    if (candidate) moduleTitle = candidate.trim();
+                }
+            }
+
+            // Fallback: If empty, just use Module Name
+            if (!moduleTitle) moduleTitle = moduleName;
+
             const moduleContainer = header.closest('.cds-AccordionRoot-container');
 
             if (moduleContainer) {
@@ -226,7 +265,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         const typeText = typeLabel.innerText;
                         let itemType = null;
 
-                        // Treat Reading as Reading if possible, or fallback
                         if (typeText.includes("Video")) itemType = 'video';
                         else if (typeText.includes("Reading")) itemType = 'reading';
 
@@ -240,7 +278,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             const href = linkEl ? linkEl.getAttribute('href') : "";
 
                             if (href) {
-                                const modNum = moduleName.match(/\d+/)[0].padStart(2, '0');
+                                const modNum = moduleName.match(/\d+/) ? moduleName.match(/\d+/)[0].padStart(2, '0') : "00";
                                 const vidNum = videoCount.toString().padStart(2, '0');
                                 let cleanTitle = rawTitle.replace(/[\\/:*?"<>|]/g, "_").trim();
 
@@ -249,7 +287,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                                 courseData.push({
                                     url: "https://www.coursera.org" + href,
                                     filename: `M${modNum}_${vidNum} - ${cleanTitle}${extension}`,
-                                    type: itemType
+                                    type: itemType,
+                                    // New Metadata
+                                    courseName: courseName,
+                                    moduleName: `M${modNum} - ${moduleTitle}`,
+                                    originalModule: moduleName
                                 });
                             }
                         }
